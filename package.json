@@ -1,9 +1,0 @@
-{
-  "name": "qwirkle-online",
-  "version": "1.0.0",
-  "description": "Statyczna gra Qwirkle",
-  "scripts": {
-    "start": "npx serve ."
-  },
-  "dependencies": {}
-}
