@@ -6,98 +6,53 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Qwirkle Multiplayer</title>
     
-    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- React & ReactDOM -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-    
-    <!-- Babel for JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-    <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
 
-    <!-- Firebase SDKs -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-firestore.js";
+    <!-- Supabase JS Client -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-        // WAŻNE: Poniżej musisz wkleić SWOJĄ konfigurację Firebase, jeśli chcesz żeby gra działała we własnym projekcie Vercel.
-        // Jeśli nie wkleisz własnego configu, gra użyje publicznej, testowej bazy danych.
-        const firebaseConfig = {
-            // Wklej tutaj swój firebaseConfig
-        };
+    <script>
+        // TUTAJ WKLEJ SWOJE KLUCZE Z SUPABASE:
+        const SUPABASE_URL = '';
+        const SUPABASE_ANON_KEY = '';
 
-        // Udostępniamy Firebase dla Reacta w oknie przeglądarki
-        window.FirebaseApp = initializeApp(firebaseConfig);
-        window.FirebaseAuth = getAuth(window.FirebaseApp);
-        window.FirebaseDB = getFirestore(window.FirebaseApp);
-        // Helpery dla Firestore
-        window.FirebaseDoc = doc;
-        window.FirebaseSetDoc = setDoc;
-        window.FirebaseGetDoc = getDoc;
-        window.FirebaseUpdateDoc = updateDoc;
-        window.FirebaseOnSnapshot = onSnapshot;
+        // Inicjalizacja Supabase
+        if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+            window.supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        }
     </script>
-
-    <style>
-        /* Hide scrollbar for Chrome, Safari and Opera */
-        .no-scrollbar::-webkit-scrollbar {
-            display: none;
-        }
-        /* Hide scrollbar for IE, Edge and Firefox */
-        .no-scrollbar {
-            -ms-overflow-style: none;  /* IE and Edge */
-            scrollbar-width: none;  /* Firefox */
-        }
-    </style>
 </head>
-<body class="bg-zinc-950 text-white">
+<body class="bg-zinc-950 text-white overflow-hidden">
     <div id="root"></div>
 
     <script type="text/babel">
-        // Wyciągamy hooki z globalnego obiektu React
         const { useState, useEffect, useRef, useMemo, useCallback } = React;
+        const supabase = window.supabaseClient;
 
-        // Atrap Icons (bo nie możemy użyć importu z lucide-react w czystym HTML)
         const Icon = ({ name, size = 24, className = "" }) => {
             return <i data-lucide={name} style={{ width: size, height: size }} className={className}></i>;
         };
 
-        // Aby ikony Lucide działały po każdym renderze
         function useLucide() {
-            useEffect(() => {
-                if (window.lucide) {
-                    window.lucide.createIcons();
-                }
-            });
+            useEffect(() => { if (window.lucide) window.lucide.createIcons(); });
         }
 
-        // --- CONFIGURATION & CONSTANTS ---
-        const appId = 'qwirkle-multiplayer-public';
         const SHAPES = ['circle', 'square', 'diamond', 'star', 'plus', 'clover'];
         const COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#a855f7'];
         const GRID_SIZE = 60;
         const CELL_SIZE = 50;
 
-        // --- HELPER FUNCTIONS ---
         const generateBag = () => {
             let bag = [];
             let id = 0;
-            for (let s of SHAPES) {
-                for (let c of COLORS) {
-                    for (let i = 0; i < 3; i++) {
-                        bag.push({ id: id++, shape: s, color: c });
-                    }
-                }
-            }
+            for (let s of SHAPES) for (let c of COLORS) for (let i = 0; i < 3; i++) bag.push({ id: id++, shape: s, color: c });
             return bag.sort(() => Math.random() - 0.5);
         };
 
-        // --- COMPONENTS ---
         const TileSVG = ({ shape, color }) => {
             switch (shape) {
                 case 'circle': return <circle cx="50" cy="50" r="30" fill={color} />;
@@ -107,10 +62,8 @@
                 case 'plus': return <path d="M35 15 h30 v20 h20 v30 h-20 v20 h-30 v-20 h-20 v-30 h20 z" fill={color} />;
                 case 'clover': return (
                     <g fill={color}>
-                        <circle cx="35" cy="35" r="20" />
-                        <circle cx="65" cy="35" r="20" />
-                        <circle cx="35" cy="65" r="20" />
-                        <circle cx="65" cy="65" r="20" />
+                        <circle cx="35" cy="35" r="20" /><circle cx="65" cy="35" r="20" />
+                        <circle cx="35" cy="65" r="20" /><circle cx="65" cy="65" r="20" />
                         <rect x="35" y="35" width="30" height="30" />
                     </g>
                 );
@@ -121,432 +74,326 @@
         const Tile = ({ tile, className = "", onClick, isSelected, isStaged, disabled }) => {
             if (!tile) return null;
             return (
-                <div
-                    onClick={disabled ? undefined : onClick}
+                <div onClick={disabled ? undefined : onClick}
                     className={`relative w-full h-full flex items-center justify-center bg-zinc-950 rounded-lg shadow-md transition-all
-                        ${isSelected ? 'ring-2 ring-yellow-400 ring-offset-2 ring-offset-zinc-800 scale-105' : 'border border-zinc-800'}
-                        ${isStaged ? 'opacity-30 grayscale' : ''}
-                        ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:bg-black'}
-                        ${className}
-                    `}
-                    style={{ boxShadow: 'inset 0 2px 4px rgba(255,255,255,0.1), 0 4px 6px rgba(0,0,0,0.5)' }}
+                        ${isSelected ? 'ring-2 ring-yellow-400 ring-offset-2 scale-105' : 'border border-zinc-800'}
+                        ${isStaged ? 'opacity-30 grayscale' : ''} ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:bg-black'} ${className}`}
                 >
-                    <svg viewBox="0 0 100 100" className="w-3/4 h-3/4 drop-shadow-md">
-                        <TileSVG shape={tile.shape} color={tile.color} />
-                    </svg>
+                    <svg viewBox="0 0 100 100" className="w-3/4 h-3/4"><TileSVG shape={tile.shape} color={tile.color} /></svg>
                 </div>
             );
         };
 
-        const Cell = React.memo(({ x, y, tile, isStaged, isSelectedHand, onClick, disabled }) => {
-            return (
-                <div
-                    onClick={() => { if (!disabled) onClick(x, y); }}
-                    className={`w-[50px] h-[50px] border border-zinc-800/30 flex items-center justify-center
-                        ${!tile && isSelectedHand && !disabled ? 'hover:bg-zinc-800/50 cursor-pointer' : ''}
-                    `}
-                >
-                    {tile && (
-                        <div className={`w-[46px] h-[46px] ${isStaged ? 'opacity-80 scale-95 ring-1 ring-blue-500' : ''}`}>
-                            <Tile tile={tile} disabled={disabled} />
-                        </div>
-                    )}
-                </div>
-            );
-        });
+        const Cell = React.memo(({ x, y, tile, isStaged, isSelectedHand, onClick, disabled }) => (
+            <div onClick={() => { if (!disabled) onClick(x, y); }} className={`w-[50px] h-[50px] border border-zinc-800/30 flex items-center justify-center ${!tile && isSelectedHand && !disabled ? 'hover:bg-zinc-800/50 cursor-pointer' : ''}`}>
+                {tile && <div className={`w-[46px] h-[46px] ${isStaged ? 'opacity-80 scale-95 ring-1 ring-blue-500' : ''}`}><Tile tile={tile} disabled={disabled} /></div>}
+            </div>
+        ));
 
-        // --- MAIN APP COMPONENT ---
         function App() {
             useLucide();
-
             const [user, setUser] = useState(null);
+            const [authLoading, setAuthLoading] = useState(true);
+            const [email, setEmail] = useState("");
+            const [password, setPassword] = useState("");
+            const [isRegistering, setIsRegistering] = useState(false);
+            const [authError, setAuthError] = useState("");
+
             const [playerName, setPlayerName] = useState("");
             const [gameId, setGameId] = useState(null);
             const [joinCodeInput, setJoinCodeInput] = useState("");
             const [gameData, setGameData] = useState(null);
-            
             const [staged, setStaged] = useState({});
             const [selectedHandId, setSelectedHandId] = useState(null);
             const [swapMode, setSwapMode] = useState(false);
             const [swapSelection, setSwapSelection] = useState([]);
             const [errorMsg, setErrorMsg] = useState("");
+            const [criticalError, setCriticalError] = useState(!supabase);
             const scrollRef = useRef(null);
 
-            // 1. Initialize Auth
+            // Sprawdzanie sesji przy starcie i nasłuchiwanie na zmiany auth
             useEffect(() => {
-                // Czekamy na załadowanie modułów Firebase z tagu <script>
-                const checkFirebase = setInterval(() => {
-                    if (window.FirebaseAuth && window.FirebaseDB) {
-                        clearInterval(checkFirebase);
-                        const { signInAnonymously, onAuthStateChanged } = window.FirebaseAuth;
-                        
-                        signInAnonymously(window.FirebaseAuth).catch(err => {
-                            console.error("Auth error:", err);
-                            showError("Błąd logowania.");
-                        });
+                if (!supabase) return;
 
-                        onAuthStateChanged(window.FirebaseAuth, (usr) => {
-                            setUser(usr);
-                            if (usr && !playerName) {
-                                setPlayerName(`Gracz ${usr.uid.substring(0,4)}`);
-                            }
-                        });
+                const checkSession = async () => {
+                    const { data: { session } } = await supabase.auth.getSession();
+                    setUser(session?.user || null);
+                    if (session?.user) {
+                        setPlayerName(session.user.user_metadata.name || `Gracz ${session.user.id.substring(0, 4)}`);
                     }
-                }, 100);
-                return () => clearInterval(checkFirebase);
+                    setAuthLoading(false);
+                };
+
+                checkSession();
+
+                const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+                    setUser(session?.user || null);
+                    if (session?.user) {
+                        setPlayerName(session.user.user_metadata.name || `Gracz ${session.user.id.substring(0, 4)}`);
+                    }
+                });
+
+                return () => subscription.unsubscribe();
             }, []);
 
-            // Odczytanie kodu z URL
             useEffect(() => {
                 const params = new URLSearchParams(window.location.search);
                 const roomCode = params.get('room');
-                if (roomCode) {
-                    setJoinCodeInput(roomCode.toUpperCase());
-                }
+                if (roomCode) setJoinCodeInput(roomCode.toUpperCase());
             }, []);
 
-            // 2. Sync Game State
+            // Nasłuchiwanie zmian z Supabase
             useEffect(() => {
-                if (!user || !gameId || !window.FirebaseDB) return;
-                
-                const gameRef = window.FirebaseDoc(window.FirebaseDB, 'games', gameId);
-                const unsubscribe = window.FirebaseOnSnapshot(gameRef, (docSnap) => {
-                    if (docSnap.exists()) {
-                        setGameData(docSnap.data());
-                    } else {
+                if (!supabase || !gameId) return;
+
+                supabase.from('games').select('state').eq('id', gameId).single().then(({ data, error }) => {
+                    if (data) setGameData(data.state);
+                    else {
                         showError("Gra o tym kodzie nie istnieje.");
                         setGameId(null);
-                        setGameData(null);
                     }
                 });
 
-                return () => unsubscribe();
-            }, [user, gameId]);
+                const channel = supabase.channel(`game_${gameId}`)
+                    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${gameId}` }, 
+                    (payload) => {
+                        setGameData(payload.new.state);
+                    }).subscribe();
 
-            // Centrowanie planszy
+                return () => supabase.removeChannel(channel);
+            }, [gameId]);
+
+            // Wyśrodkowanie planszy
             useEffect(() => {
                 if (gameData?.gameState === 'playing' && scrollRef.current && Object.keys(gameData.board || {}).length === 0) {
-                    const container = scrollRef.current;
-                    container.scrollTop = (GRID_SIZE * CELL_SIZE) / 2 - container.clientHeight / 2;
-                    container.scrollLeft = (GRID_SIZE * CELL_SIZE) / 2 - container.clientWidth / 2;
+                    const c = scrollRef.current;
+                    c.scrollTop = (GRID_SIZE * CELL_SIZE) / 2 - c.clientHeight / 2;
+                    c.scrollLeft = (GRID_SIZE * CELL_SIZE) / 2 - c.clientWidth / 2;
                 }
             }, [gameData?.gameState]);
 
-            const showError = (msg) => {
-                setErrorMsg(msg);
-                setTimeout(() => setErrorMsg(""), 3000);
+            const showError = (msg) => { setErrorMsg(msg); setTimeout(() => setErrorMsg(""), 3000); };
+
+            // --- AUTHENTICATION ---
+            const handleAuth = async (e) => {
+                e.preventDefault();
+                setAuthError("");
+                
+                if (isRegistering) {
+                    if (!playerName.trim()) return setAuthError("Podaj imię gracza.");
+                    const { error } = await supabase.auth.signUp({
+                        email,
+                        password,
+                        options: { data: { name: playerName } }
+                    });
+                    if (error) setAuthError(error.message);
+                    else alert("Zarejestrowano! Sprawdź email, aby potwierdzić (jeśli wymagane) lub zaloguj się.");
+                } else {
+                    const { error } = await supabase.auth.signInWithPassword({ email, password });
+                    if (error) setAuthError("Błędny email lub hasło.");
+                }
             };
 
-            // --- LOBBY ACTIONS ---
+            const handleLogout = async () => {
+                await supabase.auth.signOut();
+                setGameId(null);
+                setGameData(null);
+            };
+
+            // --- GAME ACTIONS ---
             const handleCreateGame = async () => {
-                if (!user) return;
+                if (!user) return showError("Musisz być zalogowany!");
                 const newGameId = Math.random().toString(36).substring(2, 6).toUpperCase();
-                const gameRef = window.FirebaseDoc(window.FirebaseDB, 'games', newGameId);
                 
-                await window.FirebaseSetDoc(gameRef, {
-                    gameState: 'lobby',
-                    hostUid: user.uid,
-                    players: [{ uid: user.uid, name: playerName, score: 0, hand: [] }],
-                    bag: [],
-                    board: {},
-                    currentPlayerIdx: 0,
-                    createdAt: new Date().getTime()
-                });
+                const initialState = {
+                    gameState: 'lobby', hostUid: user.id, players: [{ uid: user.id, name: playerName, score: 0, hand: [] }],
+                    bag: [], board: {}, currentPlayerIdx: 0
+                };
+
+                const { error } = await supabase.from('games').insert([{ id: newGameId, state: initialState }]);
+                
+                if (error) return showError("Błąd serwera. Nie udało się utworzyć pokoju.");
                 
                 setGameId(newGameId);
                 window.history.pushState({}, '', `?room=${newGameId}`);
             };
 
             const handleJoinGame = async () => {
-                if (!user || !joinCodeInput.trim()) return;
+                if (!user) return showError("Musisz być zalogowany!");
+                if (!joinCodeInput.trim()) return showError("Podaj kod!");
                 const code = joinCodeInput.trim().toUpperCase();
                 
-                const gameRef = window.FirebaseDoc(window.FirebaseDB, 'games', code);
-                const docSnap = await window.FirebaseGetDoc(gameRef);
+                const { data, error } = await supabase.from('games').select('state').eq('id', code).single();
                 
-                if (docSnap.exists()) {
-                    const data = docSnap.data();
-                    if (data.gameState !== 'lobby') {
-                        showError("Ta gra już się rozpoczęła!");
-                        return;
-                    }
-                    if (data.players.length >= 4) {
-                        showError("Pokój jest pełny.");
-                        return;
-                    }
+                if (data && data.state) {
+                    let state = data.state;
+                    if (state.gameState !== 'lobby') return showError("Gra się już rozpoczęła.");
+                    if (state.players.length >= 4) return showError("Pokój pełny.");
                     
-                    const isAlreadyIn = data.players.some(p => p.uid === user.uid);
-                    if (!isAlreadyIn) {
-                        await window.FirebaseUpdateDoc(gameRef, {
-                            players: [...data.players, { uid: user.uid, name: playerName, score: 0, hand: [] }]
-                        });
+                    if (!state.players.some(p => p.uid === user.id)) {
+                        state.players.push({ uid: user.id, name: playerName, score: 0, hand: [] });
+                        await supabase.from('games').update({ state }).eq('id', code);
                     }
                     setGameId(code);
                     window.history.pushState({}, '', `?room=${code}`);
                 } else {
-                    showError("Nie znaleziono gry.");
+                    showError("Błędny kod lub pokój nie istnieje.");
                 }
             };
 
             const handleStartGame = async () => {
-                if (!user || !gameData || gameData.hostUid !== user.uid) return;
-                
-                let currentBag = generateBag();
-                const initializedPlayers = gameData.players.map(p => {
-                    const startHand = currentBag.slice(0, 6);
-                    currentBag = currentBag.slice(6);
-                    return { ...p, hand: startHand };
-                });
-
-                const gameRef = window.FirebaseDoc(window.FirebaseDB, 'games', gameId);
-                await window.FirebaseUpdateDoc(gameRef, {
-                    gameState: 'playing',
-                    bag: currentBag,
-                    players: initializedPlayers,
-                    currentPlayerIdx: 0,
-                    board: {}
-                });
+                let bag = generateBag();
+                const players = gameData.players.map(p => { const h = bag.slice(0, 6); bag = bag.slice(6); return { ...p, hand: h }; });
+                const newState = { ...gameData, gameState: 'playing', bag, players, currentPlayerIdx: 0, board: {} };
+                await supabase.from('games').update({ state: newState }).eq('id', gameId);
             };
 
-            const handleLeaveGame = () => {
-                setGameId(null);
-                setGameData(null);
-                setStaged({});
-                setSelectedHandId(null);
-                window.history.pushState({}, '', window.location.pathname);
-            };
+            const handleLeaveGame = () => { setGameId(null); setGameData(null); setStaged({}); setSelectedHandId(null); window.history.pushState({}, '', window.location.pathname); };
 
-            // --- GAME LOGIC ---
-            const isMyTurn = gameData?.gameState === 'playing' && gameData?.players[gameData?.currentPlayerIdx]?.uid === user?.uid;
-            const myPlayer = gameData?.players.find(p => p.uid === user?.uid);
-            const myHand = myPlayer?.hand || [];
+            const isMyTurn = gameData?.gameState === 'playing' && gameData?.players[gameData?.currentPlayerIdx]?.uid === user?.id;
+            const myHand = gameData?.players.find(p => p.uid === user?.id)?.hand || [];
             const board = gameData?.board || {};
 
             const handleCellClick = useCallback((x, y) => {
                 if (!isMyTurn) return;
                 const key = `${x},${y}`;
-                
-                if (staged[key]) {
-                    const newStaged = { ...staged };
-                    delete newStaged[key];
-                    setStaged(newStaged);
-                    setSelectedHandId(null);
-                    return;
-                }
-                
-                if (!board[key] && selectedHandId !== null && !staged[key]) {
-                    setStaged(prev => ({ ...prev, [key]: selectedHandId }));
-                    setSelectedHandId(null);
-                }
+                if (staged[key]) { const n = { ...staged }; delete n[key]; setStaged(n); setSelectedHandId(null); }
+                else if (!board[key] && selectedHandId !== null && !staged[key]) { setStaged(p => ({ ...p, [key]: selectedHandId })); setSelectedHandId(null); }
             }, [board, staged, selectedHandId, isMyTurn]);
 
-            const handleHandClick = (tileId) => {
+            const handleHandClick = (id) => {
                 if (!isMyTurn) return;
-                if (swapMode) {
-                    setSwapSelection(prev => prev.includes(tileId) ? prev.filter(id => id !== tileId) : [...prev, tileId]);
-                    return;
-                }
-                if (Object.values(staged).includes(tileId)) return;
-                setSelectedHandId(prev => prev === tileId ? null : tileId);
+                if (swapMode) return setSwapSelection(p => p.includes(id) ? p.filter(i => i !== id) : [...p, id]);
+                if (!Object.values(staged).includes(id)) setSelectedHandId(p => p === id ? null : id);
             };
 
-            // Walidacja ułożenia
-            const validateTurn = () => {
-                const stagedKeys = Object.keys(staged);
-                if (stagedKeys.length === 0) return { valid: false, reason: "Brak płytek na planszy." };
-
-                const merged = { ...board };
-                Object.entries(staged).forEach(([key, id]) => { merged[key] = myHand.find(t => t.id === id); });
-
-                const stagedCoords = stagedKeys.map(k => {
-                    const [x, y] = k.split(',').map(Number);
-                    return { x, y, tile: myHand.find(t => t.id === staged[k]) };
-                });
-
-                const isSameX = stagedCoords.every(c => c.x === stagedCoords[0].x);
-                const isSameY = stagedCoords.every(c => c.y === stagedCoords[0].y);
-                if (!isSameX && !isSameY) return { valid: false, reason: "Płytki w jednej linii." };
-
-                // Sprawdzenie przerw w kładzionej linii
-                if (isSameX) {
-                    const x = stagedCoords[0].x;
-                    const minY = Math.min(...stagedCoords.map(c => c.y));
-                    const maxY = Math.max(...stagedCoords.map(c => c.y));
-                    for (let y = minY; y <= maxY; y++) {
-                        if (!merged[`${x},${y}`]) return { valid: false, reason: "Linia ma przerwy." };
-                    }
-                } else {
-                    const y = stagedCoords[0].y;
-                    const minX = Math.min(...stagedCoords.map(c => c.x));
-                    const maxX = Math.max(...stagedCoords.map(c => c.x));
-                    for (let x = minX; x <= maxX; x++) {
-                        if (!merged[`${x},${y}`]) return { valid: false, reason: "Linia ma przerwy." };
-                    }
-                }
-
-                // Podłączenie do planszy
-                const boardKeys = Object.keys(board);
-                if (boardKeys.length > 0) {
-                    const hasConnection = stagedCoords.some(c => {
-                        return board[`${c.x + 1},${c.y}`] || board[`${c.x - 1},${c.y}`] ||
-                               board[`${c.x},${c.y + 1}`] || board[`${c.x},${c.y - 1}`];
-                    });
-                    if (!hasConnection) return { valid: false, reason: "Brak połączenia z planszą." };
-                }
-
-                // Sprawdzenie poprawności linii (helpery)
-                const getLine = (x, y, dx, dy) => {
-                    let line = [], cx = x + dx, cy = y + dy;
-                    while (merged[`${cx},${cy}`]) {
-                        line.push({ x: cx, y: cy, tile: merged[`${cx},${cy}`] });
-                        cx += dx; cy += dy;
-                    }
-                    return line;
-                };
-                const getFullLine = (x, y, dx, dy) => {
-                    const t = merged[`${x},${y}`];
-                    if (!t) return [];
-                    return [...getLine(x, y, -dx, -dy).reverse(), { x, y, tile: t }, ...getLine(x, y, dx, dy)];
-                };
-                const isValidSeq = (tiles) => {
-                    const sc = tiles.every(t => t.color === tiles[0].color);
-                    const ss = tiles.every(t => t.shape === tiles[0].shape);
-                    if (!sc && !ss) return false;
-                    return new Set(tiles.map(t => t.color + t.shape)).size === tiles.length;
+            const submitTurn = async (pts, hand, bag, newBoard) => {
+                const p = gameData.players.map(pl => pl.uid === user.id ? { ...pl, hand, score: pl.score + pts } : pl);
+                const isOver = bag.length === 0 && hand.length === 0;
+                if (isOver) { const idx = p.findIndex(pl => pl.uid === user.id); if (idx !== -1) p[idx].score += 6; }
+                
+                const newState = {
+                    ...gameData,
+                    players: p, bag, board: newBoard, currentPlayerIdx: (gameData.currentPlayerIdx + 1) % p.length,
+                    ...(isOver ? { gameState: 'gameover' } : {})
                 };
 
-                for (let { x, y } of stagedCoords) {
-                    const hL = getFullLine(x, y, 1, 0);
-                    const vL = getFullLine(x, y, 0, 1);
-                    if (hL.length > 1 && !isValidSeq(hL.map(i => i.tile))) return { valid: false, reason: "Błąd w linii poziomej." };
-                    if (vL.length > 1 && !isValidSeq(vL.map(i => i.tile))) return { valid: false, reason: "Błąd w linii pionowej." };
-                }
-                return { valid: true };
-            };
-
-            const submitTurn = async (points, newHand, newBag, newBoard) => {
-                const gameRef = window.FirebaseDoc(window.FirebaseDB, 'games', gameId);
-                const updatedPlayers = gameData.players.map(p => {
-                    if (p.uid === user.uid) return { ...p, hand: newHand, score: p.score + points };
-                    return p;
-                });
-
-                let isOver = newBag.length === 0 && newHand.length === 0;
-                if (isOver) {
-                    const pIdx = updatedPlayers.findIndex(p => p.uid === user.uid);
-                    if(pIdx !== -1) updatedPlayers[pIdx].score += 6;
-                }
-
-                const payload = {
-                    players: updatedPlayers,
-                    bag: newBag,
-                    board: newBoard,
-                    currentPlayerIdx: (gameData.currentPlayerIdx + 1) % gameData.players.length
-                };
-                if (isOver) payload.gameState = 'gameover';
-
-                await window.FirebaseUpdateDoc(gameRef, payload);
+                await supabase.from('games').update({ state: newState }).eq('id', gameId);
                 setStaged({}); setSelectedHandId(null); setSwapMode(false); setSwapSelection([]);
             };
 
             const handleConfirmTurn = () => {
-                if (!isMyTurn) return;
-                const val = validateTurn();
-                if (!val.valid) { showError(val.reason); return; }
-
-                // Uproszczone naliczanie punktów
-                let pts = Object.keys(staged).length; 
-                // UWAGA: W pełnej wersji tutaj znajduje się skomplikowany system liczenia Qwirkle.
-                // Uprościłem to dla czytelności kodu w jednym pliku HTML, dodaje +1 pkt za płytkę.
-
-                const newBoard = { ...board };
-                const used = Object.values(staged);
-                Object.entries(staged).forEach(([pos, id]) => { newBoard[pos] = myHand.find(t => t.id === id); });
-
-                let newHand = myHand.filter(t => !used.includes(t.id));
-                const needed = 6 - newHand.length;
-                let newBag = [...gameData.bag];
-                if (needed > 0 && newBag.length > 0) {
-                    newHand = [...newHand, ...newBag.slice(0, needed)];
-                    newBag = newBag.slice(needed);
-                }
-                submitTurn(pts, newHand, newBag, newBoard);
+                if (!isMyTurn || Object.keys(staged).length === 0) return;
+                const nb = { ...board };
+                Object.entries(staged).forEach(([k, id]) => nb[k] = myHand.find(t => t.id === id));
+                let nh = myHand.filter(t => !Object.values(staged).includes(t.id));
+                let nb_bag = [...gameData.bag];
+                if (6 - nh.length > 0 && nb_bag.length > 0) { nh = [...nh, ...nb_bag.slice(0, 6 - nh.length)]; nb_bag = nb_bag.slice(6 - nh.length); }
+                submitTurn(Object.keys(staged).length, nh, nb_bag, nb);
             };
 
             const handleSwapConfirm = () => {
                 if (!isMyTurn || swapSelection.length === 0) return;
-                if (swapSelection.length > gameData.bag.length) { showError("Za mało płytek w worku."); return; }
-
                 const kept = myHand.filter(t => !swapSelection.includes(t.id));
-                const ret = myHand.filter(t => swapSelection.includes(t.id));
-                const mixed = [...gameData.bag, ...ret].sort(() => Math.random() - 0.5);
-                submitTurn(0, [...kept, ...mixed.slice(0, swapSelection.length)], mixed.slice(swapSelection.length), board);
+                const mix = [...gameData.bag, ...myHand.filter(t => swapSelection.includes(t.id))].sort(() => Math.random() - 0.5);
+                submitTurn(0, [...kept, ...mix.slice(0, swapSelection.length)], mix.slice(swapSelection.length), board);
             };
 
-            // RENDEROWANIE
-            if (!user) return <div className="flex h-screen items-center justify-center"><Icon name="loader" className="animate-spin text-orange-500" /></div>;
+            if (criticalError) return (
+                <div className="flex flex-col h-screen items-center justify-center bg-red-950 p-6 text-center">
+                    <Icon name="alert-circle" size={64} className="text-red-500 mb-4" />
+                    <h1 className="text-3xl font-bold text-white mb-2">Brak konfiguracji Supabase!</h1>
+                    <p className="text-red-200 mb-6 max-w-lg">
+                        Aby gra działała, uzupełnij zmienne <code>SUPABASE_URL</code> oraz <code>SUPABASE_ANON_KEY</code> na górze pliku index.html.
+                    </p>
+                </div>
+            );
 
-            // MENU
-            if (!gameId || !gameData) {
+            if (authLoading) return <div className="flex h-screen items-center justify-center"><Icon name="loader" className="animate-spin text-orange-500" size={48} /></div>;
+
+            // --- LOGIN SCREEN ---
+            if (!user) {
                 return (
                     <div className="flex flex-col items-center justify-center h-screen p-6 relative">
                         <h1 className="text-6xl font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-yellow-500 mb-2">QWIRKLE</h1>
-                        <div className="w-full max-w-sm bg-zinc-900 border border-zinc-800 p-8 rounded-3xl mt-8">
-                            <input value={playerName} onChange={e => setPlayerName(e.target.value)} className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-4 py-3 mb-4" placeholder="Twoje imię..." />
-                            <button onClick={handleCreateGame} className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-orange-600 rounded-xl font-bold"><Icon name="users" /> Utwórz pokój</button>
-                            <div className="my-6 border-t border-zinc-800 relative"><span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-zinc-900 px-2 text-xs">LUB</span></div>
-                            <div className="flex gap-2">
-                                <input value={joinCodeInput} onChange={e => setJoinCodeInput(e.target.value.toUpperCase())} placeholder="KOD" className="flex-1 bg-zinc-950 border border-zinc-700 rounded-xl px-4 text-center uppercase" maxLength="4" />
-                                <button onClick={handleJoinGame} className="px-6 py-3 bg-blue-600 rounded-xl font-bold">Dołącz</button>
+                        <p className="text-zinc-500 mb-8 tracking-widest text-sm uppercase">Zaloguj się aby grać z każdego urządzenia</p>
+                        
+                        <form onSubmit={handleAuth} className="w-full max-w-sm bg-zinc-900 border border-zinc-800 p-8 rounded-3xl flex flex-col gap-4 shadow-2xl">
+                            {isRegistering && (
+                                <div className="flex flex-col gap-1">
+                                    <label className="text-xs text-zinc-400 uppercase font-bold pl-1">Imię gracza</label>
+                                    <input value={playerName} onChange={e => setPlayerName(e.target.value)} className="bg-zinc-950 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:border-orange-500 outline-none" required />
+                                </div>
+                            )}
+                            <div className="flex flex-col gap-1">
+                                <label className="text-xs text-zinc-400 uppercase font-bold pl-1">Email</label>
+                                <input type="email" value={email} onChange={e => setEmail(e.target.value)} className="bg-zinc-950 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:border-orange-500 outline-none" required />
                             </div>
-                        </div>
-                        {errorMsg && <div className="absolute top-10 bg-red-500 px-6 py-3 rounded-full">{errorMsg}</div>}
+                            <div className="flex flex-col gap-1">
+                                <label className="text-xs text-zinc-400 uppercase font-bold pl-1">Hasło</label>
+                                <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="bg-zinc-950 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:border-orange-500 outline-none" required />
+                            </div>
+                            
+                            {authError && <p className="text-red-500 text-sm">{authError}</p>}
+                            
+                            <button type="submit" className="w-full mt-4 bg-orange-600 hover:bg-orange-500 text-white font-bold py-3 rounded-xl transition">
+                                {isRegistering ? "Zarejestruj się" : "Zaloguj się"}
+                            </button>
+                            
+                            <p className="text-center text-sm text-zinc-500 mt-4 cursor-pointer hover:text-zinc-300" onClick={() => { setIsRegistering(!isRegistering); setAuthError(""); }}>
+                                {isRegistering ? "Masz już konto? Zaloguj się" : "Nie masz konta? Zarejestruj się"}
+                            </p>
+                        </form>
                     </div>
                 );
             }
 
-            // LOBBY
-            if (gameData.gameState === 'lobby') {
-                return (
-                    <div className="flex flex-col items-center justify-center h-screen p-6">
-                        <div className="mb-8 text-center bg-zinc-900 p-6 rounded-2xl border border-zinc-800 w-full max-w-md">
-                            <p className="text-zinc-500 mb-2">KOD POKOJU</p>
-                            <h2 className="text-5xl font-mono text-orange-500 mb-4">{gameId}</h2>
-                            <button onClick={() => {
-                                const url = `${window.location.href.split('?')[0]}?room=${gameId}`;
-                                navigator.clipboard.writeText(url);
-                                showError("Skopiowano link!");
-                            }} className="w-full bg-blue-600 py-2 rounded-xl text-sm font-bold flex justify-center items-center gap-2"><Icon name="copy" size={16}/> Skopiuj link</button>
-                        </div>
-                        <div className="w-full max-w-md bg-zinc-900 p-6 rounded-2xl mb-8">
-                            <h3 className="mb-4 text-zinc-400">Gracze ({gameData.players.length}/4)</h3>
-                            {gameData.players.map(p => (
-                                <div key={p.uid} className="bg-zinc-950 p-3 mb-2 rounded-xl">{p.name} {p.uid === user.uid ? '(Ty)' : ''}</div>
-                            ))}
-                        </div>
-                        {gameData.hostUid === user.uid && <button onClick={handleStartGame} className="bg-green-600 px-8 py-4 rounded-full font-bold flex gap-2"><Icon name="play"/> Rozpocznij</button>}
-                        <button onClick={handleLeaveGame} className="mt-8 text-zinc-500">Wyjdź</button>
-                        {errorMsg && <div className="absolute top-10 bg-blue-500 px-6 py-3 rounded-full">{errorMsg}</div>}
-                    </div>
-                );
-            }
+            // --- LOBBY / MENU ---
+            if (!gameId || !gameData) return (
+                <div className="flex flex-col items-center justify-center h-screen p-6 relative">
+                    <button onClick={handleLogout} className="absolute top-6 right-6 text-zinc-500 hover:text-white flex items-center gap-2"><Icon name="log-out" size={20}/> Wyloguj</button>
+                    <h1 className="text-6xl font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-yellow-500 mb-2">QWIRKLE</h1>
+                    <p className="text-zinc-500 mb-8 text-lg">Zalogowano jako <span className="font-bold text-white">{playerName}</span></p>
 
-            // GAME
+                    <div className="w-full max-w-sm bg-zinc-900 border border-zinc-800 p-8 rounded-3xl">
+                        <button onClick={handleCreateGame} className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-orange-600 hover:bg-orange-500 rounded-xl font-bold text-white transition"><Icon name="users" /> Utwórz pokój</button>
+                        <div className="my-6 border-t border-zinc-800 relative"><span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-zinc-900 px-2 text-xs text-zinc-500">LUB</span></div>
+                        <div className="flex gap-2">
+                            <input value={joinCodeInput} onChange={e => setJoinCodeInput(e.target.value.toUpperCase())} placeholder="KOD POKOJU" className="flex-1 bg-zinc-950 border border-zinc-700 rounded-xl px-4 text-center uppercase text-white" maxLength="4" />
+                            <button onClick={handleJoinGame} className="px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold text-white transition">Dołącz</button>
+                        </div>
+                    </div>
+                    {errorMsg && <div className="absolute top-10 bg-red-500 px-6 py-3 rounded-full text-white">{errorMsg}</div>}
+                </div>
+            );
+
+            if (gameData.gameState === 'lobby') return (
+                <div className="flex flex-col items-center justify-center h-screen p-6">
+                    <div className="mb-8 text-center bg-zinc-900 p-6 rounded-2xl border border-zinc-800 w-full max-w-md">
+                        <p className="text-zinc-500 mb-2">KOD POKOJU</p>
+                        <h2 className="text-5xl font-mono text-orange-500 mb-4">{gameId}</h2>
+                        <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?room=${gameId}`); showError("Skopiowano link!"); }} className="w-full bg-blue-600 py-3 rounded-xl text-sm font-bold flex justify-center items-center gap-2 text-white"><Icon name="copy" size={16}/> Skopiuj link dla znajomych</button>
+                    </div>
+                    <div className="w-full max-w-md bg-zinc-900 p-6 rounded-2xl mb-8">
+                        <h3 className="mb-4 text-zinc-400">Gracze ({gameData.players.length}/4)</h3>
+                        {gameData.players.map(p => <div key={p.uid} className="bg-zinc-950 p-3 mb-2 rounded-xl text-white">{p.name} {p.uid === user.id ? '(Ty)' : ''}</div>)}
+                    </div>
+                    {gameData.hostUid === user.id && <button onClick={handleStartGame} disabled={gameData.players.length < 2} className="bg-green-600 disabled:opacity-50 px-8 py-4 rounded-full font-bold flex gap-2 text-white"><Icon name="play"/> Rozpocznij</button>}
+                    <button onClick={handleLeaveGame} className="mt-8 text-zinc-500 hover:text-white transition">Wyjdź z pokoju</button>
+                    {errorMsg && <div className="absolute top-10 bg-blue-500 px-6 py-3 rounded-full text-white">{errorMsg}</div>}
+                </div>
+            );
+
             const activePlayer = gameData.players[gameData.currentPlayerIdx];
             return (
                 <div className="flex flex-col h-screen">
                     <header className="p-3 bg-zinc-950 flex justify-between items-center border-b border-zinc-800">
-                        <h1 className="text-orange-500 font-bold">QWIRKLE <span className="text-xs text-zinc-500 ml-2">#{gameId}</span></h1>
-                        <div className="flex gap-4">
-                            {gameData.players.map(p => (
-                                <div key={p.uid} className={`text-sm ${p.uid === activePlayer.uid ? 'text-white font-bold' : 'text-zinc-500'}`}>{p.name}: {p.score}</div>
-                            ))}
+                        <h1 className="text-orange-500 font-bold">QWIRKLE <span className="text-xs text-zinc-500 ml-2 hidden md:inline">#{gameId}</span></h1>
+                        <div className="flex gap-4 overflow-x-auto">
+                            {gameData.players.map(p => <div key={p.uid} className={`text-sm ${p.uid === activePlayer.uid ? 'text-white font-bold' : 'text-zinc-500'}`}>{p.name}: {p.score}</div>)}
                         </div>
                     </header>
-                    <div className={`text-center py-1 text-xs font-bold uppercase ${isMyTurn ? 'bg-green-600' : 'bg-zinc-800'}`}>
-                        {isMyTurn ? 'Twój ruch!' : `Ruch: ${activePlayer.name}`}
-                    </div>
-                    {errorMsg && <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 bg-red-500 px-6 py-2 rounded-full">{errorMsg}</div>}
+                    <div className={`text-center py-1 text-xs font-bold uppercase text-white ${isMyTurn ? 'bg-green-600' : 'bg-zinc-800'}`}>{isMyTurn ? 'Twój ruch!' : `Czekaj, ruch wykonuje: ${activePlayer.name}`}</div>
                     
                     <main ref={scrollRef} className="flex-1 overflow-auto bg-[#1a1a1c] relative cursor-grab">
                         <div style={{ width: GRID_SIZE*CELL_SIZE, height: GRID_SIZE*CELL_SIZE, display: 'grid', gridTemplateColumns: `repeat(${GRID_SIZE}, ${CELL_SIZE}px)`}}>
@@ -559,18 +406,16 @@
                     </main>
 
                     <footer className="bg-zinc-950 p-4 border-t border-zinc-800 flex flex-col items-center">
-                        <div className="flex gap-2 h-16 mb-4">
-                            {myHand.map(t => (
-                                <div key={t.id} className="w-16 h-16"><Tile tile={t} isSelected={swapMode?swapSelection.includes(t.id):selectedHandId===t.id} isStaged={Object.values(staged).includes(t.id)} disabled={!isMyTurn} onClick={()=>handleHandClick(t.id)}/></div>
-                            ))}
+                        <div className="flex justify-center gap-2 h-14 md:h-16 mb-4 w-full max-w-xl">
+                            {myHand.map(t => <div key={t.id} className="w-14 h-14 md:w-16 md:h-16"><Tile tile={t} isSelected={swapMode?swapSelection.includes(t.id):selectedHandId===t.id} isStaged={Object.values(staged).includes(t.id)} disabled={!isMyTurn} onClick={()=>handleHandClick(t.id)}/></div>)}
                         </div>
                         {swapMode ? (
-                            <div className="flex gap-2"><button onClick={()=>setSwapMode(false)} className="px-4 py-2 bg-zinc-700 rounded-lg">Anuluj</button><button onClick={handleSwapConfirm} className="px-4 py-2 bg-blue-600 rounded-lg">Zatwierdź wymianę</button></div>
+                            <div className="flex gap-2"><button onClick={()=>setSwapMode(false)} className="px-4 py-2 bg-zinc-700 rounded-lg text-white">Anuluj</button><button onClick={handleSwapConfirm} className="px-4 py-2 bg-blue-600 rounded-lg text-white">Zatwierdź wymianę</button></div>
                         ) : (
                             <div className="flex gap-2 w-full max-w-md">
-                                <button onClick={()=>setSwapMode(true)} disabled={!isMyTurn} className="flex-1 bg-zinc-800 py-2 rounded-lg disabled:opacity-50">Wymień</button>
-                                <button onClick={()=>{setStaged({}); setSelectedHandId(null);}} disabled={!isMyTurn || Object.keys(staged).length===0} className="flex-1 bg-zinc-800 py-2 rounded-lg disabled:opacity-50">Cofnij</button>
-                                <button onClick={handleConfirmTurn} disabled={!isMyTurn || Object.keys(staged).length===0} className="flex-[2] bg-green-600 py-2 rounded-lg font-bold disabled:opacity-50">Zatwierdź ruch</button>
+                                <button onClick={()=>setSwapMode(true)} disabled={!isMyTurn || gameData.bag.length===0} className="flex-1 bg-zinc-800 py-2 rounded-lg disabled:opacity-50 text-white">Wymień</button>
+                                <button onClick={()=>{setStaged({}); setSelectedHandId(null);}} disabled={!isMyTurn || Object.keys(staged).length===0} className="flex-1 bg-zinc-800 py-2 rounded-lg disabled:opacity-50 text-white">Cofnij</button>
+                                <button onClick={handleConfirmTurn} disabled={!isMyTurn || Object.keys(staged).length===0} className="flex-[2] bg-green-600 py-2 rounded-lg font-bold disabled:opacity-50 text-white">Zatwierdź</button>
                             </div>
                         )}
                     </footer>
