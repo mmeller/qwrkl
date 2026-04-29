@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Qwirkle Multiplayer</title>
+    <title>Qwirkle Multiplayer - Ad Hoc</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
@@ -23,6 +23,14 @@
         if (SUPABASE_URL && SUPABASE_ANON_KEY) {
             window.supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
         }
+
+        // Generowanie i zapisywanie UID lokalnie
+        let myUid = localStorage.getItem('qwirkle_uid');
+        if (!myUid) {
+            myUid = 'usr_' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('qwirkle_uid', myUid);
+        }
+        window.MY_UID = myUid;
     </script>
 </head>
 <body class="bg-zinc-950 text-white overflow-hidden">
@@ -31,8 +39,9 @@
     <script type="text/babel">
         const { useState, useEffect, useRef, useMemo, useCallback } = React;
         const supabase = window.supabaseClient;
+        const MY_UID = window.MY_UID;
 
-        // BŁĄD NAPRAWIONY TUTAJ: Używamy wrappera, aby Lucide nie gryzło się z wirtualnym DOM Reacta
+        // Wrapper dla Lucide, aby nie gryzło się z wirtualnym DOM Reacta
         const Icon = ({ name, size = 24, className = "" }) => {
             const wrapperRef = useRef(null);
             
@@ -96,14 +105,7 @@
         ));
 
         function App() {
-            const [user, setUser] = useState(null);
-            const [authLoading, setAuthLoading] = useState(true);
-            const [email, setEmail] = useState("");
-            const [password, setPassword] = useState("");
-            const [isRegistering, setIsRegistering] = useState(false);
-            const [authError, setAuthError] = useState("");
-
-            const [playerName, setPlayerName] = useState("");
+            const [playerName, setPlayerName] = useState(localStorage.getItem('qwirkle_name') || "");
             const [gameId, setGameId] = useState(null);
             const [joinCodeInput, setJoinCodeInput] = useState("");
             const [gameData, setGameData] = useState(null);
@@ -114,31 +116,6 @@
             const [errorMsg, setErrorMsg] = useState("");
             const [criticalError, setCriticalError] = useState(!supabase);
             const scrollRef = useRef(null);
-
-            // Sprawdzanie sesji przy starcie i nasłuchiwanie na zmiany auth
-            useEffect(() => {
-                if (!supabase) return;
-
-                const checkSession = async () => {
-                    const { data: { session } } = await supabase.auth.getSession();
-                    setUser(session?.user || null);
-                    if (session?.user) {
-                        setPlayerName(session.user.user_metadata.name || `Gracz ${session.user.id.substring(0, 4)}`);
-                    }
-                    setAuthLoading(false);
-                };
-
-                checkSession();
-
-                const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-                    setUser(session?.user || null);
-                    if (session?.user) {
-                        setPlayerName(session.user.user_metadata.name || `Gracz ${session.user.id.substring(0, 4)}`);
-                    }
-                });
-
-                return () => subscription.unsubscribe();
-            }, []);
 
             useEffect(() => {
                 const params = new URLSearchParams(window.location.search);
@@ -178,39 +155,19 @@
 
             const showError = (msg) => { setErrorMsg(msg); setTimeout(() => setErrorMsg(""), 3000); };
 
-            // --- AUTHENTICATION ---
-            const handleAuth = async (e) => {
-                e.preventDefault();
-                setAuthError("");
-                
-                if (isRegistering) {
-                    if (!playerName.trim()) return setAuthError("Podaj imię gracza.");
-                    const { error } = await supabase.auth.signUp({
-                        email,
-                        password,
-                        options: { data: { name: playerName } }
-                    });
-                    if (error) setAuthError(error.message);
-                    else alert("Zarejestrowano! Sprawdź email, aby potwierdzić (jeśli wymagane) lub zaloguj się.");
-                } else {
-                    const { error } = await supabase.auth.signInWithPassword({ email, password });
-                    if (error) setAuthError("Błędny email lub hasło.");
-                }
-            };
-
-            const handleLogout = async () => {
-                await supabase.auth.signOut();
-                setGameId(null);
-                setGameData(null);
+            const handleNameChange = (val) => {
+                setPlayerName(val);
+                localStorage.setItem('qwirkle_name', val);
             };
 
             // --- GAME ACTIONS ---
             const handleCreateGame = async () => {
-                if (!user) return showError("Musisz być zalogowany!");
-                const newGameId = Math.random().toString(36).substring(2, 6).toUpperCase();
+                if (!playerName.trim()) return showError("Podaj swoje imię!");
+                // Zmieniono długość kodu na 6 znaków
+                const newGameId = Math.random().toString(36).substring(2, 8).toUpperCase();
                 
                 const initialState = {
-                    gameState: 'lobby', hostUid: user.id, players: [{ uid: user.id, name: playerName, score: 0, hand: [] }],
+                    gameState: 'lobby', hostUid: MY_UID, players: [{ uid: MY_UID, name: playerName, score: 0, hand: [] }],
                     bag: [], board: {}, currentPlayerIdx: 0
                 };
 
@@ -223,7 +180,7 @@
             };
 
             const handleJoinGame = async () => {
-                if (!user) return showError("Musisz być zalogowany!");
+                if (!playerName.trim()) return showError("Podaj swoje imię!");
                 if (!joinCodeInput.trim()) return showError("Podaj kod!");
                 const code = joinCodeInput.trim().toUpperCase();
                 
@@ -234,8 +191,8 @@
                     if (state.gameState !== 'lobby') return showError("Gra się już rozpoczęła.");
                     if (state.players.length >= 4) return showError("Pokój pełny.");
                     
-                    if (!state.players.some(p => p.uid === user.id)) {
-                        state.players.push({ uid: user.id, name: playerName, score: 0, hand: [] });
+                    if (!state.players.some(p => p.uid === MY_UID)) {
+                        state.players.push({ uid: MY_UID, name: playerName, score: 0, hand: [] });
                         await supabase.from('games').update({ state }).eq('id', code);
                     }
                     setGameId(code);
@@ -254,8 +211,8 @@
 
             const handleLeaveGame = () => { setGameId(null); setGameData(null); setStaged({}); setSelectedHandId(null); window.history.pushState({}, '', window.location.pathname); };
 
-            const isMyTurn = gameData?.gameState === 'playing' && gameData?.players[gameData?.currentPlayerIdx]?.uid === user?.id;
-            const myHand = gameData?.players.find(p => p.uid === user?.id)?.hand || [];
+            const isMyTurn = gameData?.gameState === 'playing' && gameData?.players[gameData?.currentPlayerIdx]?.uid === MY_UID;
+            const myHand = gameData?.players.find(p => p.uid === MY_UID)?.hand || [];
             const board = gameData?.board || {};
 
             const handleCellClick = useCallback((x, y) => {
@@ -403,9 +360,9 @@
             };
 
             const submitTurn = async (pts, hand, bag, newBoard) => {
-                const p = gameData.players.map(pl => pl.uid === user.id ? { ...pl, hand, score: pl.score + pts } : pl);
+                const p = gameData.players.map(pl => pl.uid === MY_UID ? { ...pl, hand, score: pl.score + pts } : pl);
                 const isOver = bag.length === 0 && hand.length === 0;
-                if (isOver) { const idx = p.findIndex(pl => pl.uid === user.id); if (idx !== -1) p[idx].score += 6; }
+                if (isOver) { const idx = p.findIndex(pl => pl.uid === MY_UID); if (idx !== -1) p[idx].score += 6; }
                 
                 const newState = {
                     ...gameData,
@@ -454,57 +411,21 @@
                 </div>
             );
 
-            if (authLoading) return <div className="flex h-screen items-center justify-center"><Icon name="loader" className="animate-spin text-orange-500" size={48} /></div>;
-
-            // --- LOGIN SCREEN ---
-            if (!user) {
-                return (
-                    <div className="flex flex-col items-center justify-center h-screen p-6 relative">
-                        <h1 className="text-6xl font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-yellow-500 mb-2">QWIRKLE</h1>
-                        <p className="text-zinc-500 mb-8 tracking-widest text-sm uppercase">Zaloguj się aby grać z każdego urządzenia</p>
-                        
-                        <form onSubmit={handleAuth} className="w-full max-w-sm bg-zinc-900 border border-zinc-800 p-8 rounded-3xl flex flex-col gap-4 shadow-2xl">
-                            {isRegistering && (
-                                <div className="flex flex-col gap-1">
-                                    <label className="text-xs text-zinc-400 uppercase font-bold pl-1">Imię gracza</label>
-                                    <input value={playerName} onChange={e => setPlayerName(e.target.value)} className="bg-zinc-950 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:border-orange-500 outline-none" required />
-                                </div>
-                            )}
-                            <div className="flex flex-col gap-1">
-                                <label className="text-xs text-zinc-400 uppercase font-bold pl-1">Email</label>
-                                <input type="email" value={email} onChange={e => setEmail(e.target.value)} className="bg-zinc-950 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:border-orange-500 outline-none" required />
-                            </div>
-                            <div className="flex flex-col gap-1">
-                                <label className="text-xs text-zinc-400 uppercase font-bold pl-1">Hasło</label>
-                                <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="bg-zinc-950 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:border-orange-500 outline-none" required />
-                            </div>
-                            
-                            {authError && <p className="text-red-500 text-sm">{authError}</p>}
-                            
-                            <button type="submit" className="w-full mt-4 bg-orange-600 hover:bg-orange-500 text-white font-bold py-3 rounded-xl transition">
-                                {isRegistering ? "Zarejestruj się" : "Zaloguj się"}
-                            </button>
-                            
-                            <p className="text-center text-sm text-zinc-500 mt-4 cursor-pointer hover:text-zinc-300" onClick={() => { setIsRegistering(!isRegistering); setAuthError(""); }}>
-                                {isRegistering ? "Masz już konto? Zaloguj się" : "Nie masz konta? Zarejestruj się"}
-                            </p>
-                        </form>
-                    </div>
-                );
-            }
-
             // --- LOBBY / MENU ---
             if (!gameId || !gameData) return (
                 <div className="flex flex-col items-center justify-center h-screen p-6 relative">
-                    <button onClick={handleLogout} className="absolute top-6 right-6 text-zinc-500 hover:text-white flex items-center gap-2"><Icon name="log-out" size={20}/> Wyloguj</button>
                     <h1 className="text-6xl font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-yellow-500 mb-2">QWIRKLE</h1>
-                    <p className="text-zinc-500 mb-8 text-lg">Zalogowano jako <span className="font-bold text-white">{playerName}</span></p>
+                    <p className="text-zinc-500 mb-8 text-lg">Podaj imię, aby rozpocząć</p>
 
                     <div className="w-full max-w-sm bg-zinc-900 border border-zinc-800 p-8 rounded-3xl">
+                        <input value={playerName} onChange={e => handleNameChange(e.target.value)} className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-4 py-3 mb-4 text-white focus:border-orange-500 outline-none" placeholder="Twoje imię..." />
+                        
                         <button onClick={handleCreateGame} className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-orange-600 hover:bg-orange-500 rounded-xl font-bold text-white transition"><Icon name="users" /> Utwórz pokój</button>
+                        
                         <div className="my-6 border-t border-zinc-800 relative"><span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-zinc-900 px-2 text-xs text-zinc-500">LUB</span></div>
+                        
                         <div className="flex gap-2">
-                            <input value={joinCodeInput} onChange={e => setJoinCodeInput(e.target.value.toUpperCase())} placeholder="KOD POKOJU" className="flex-1 bg-zinc-950 border border-zinc-700 rounded-xl px-4 text-center uppercase text-white" maxLength="4" />
+                            <input value={joinCodeInput} onChange={e => setJoinCodeInput(e.target.value.toUpperCase())} placeholder="KOD (6 ZNAKÓW)" className="flex-1 bg-zinc-950 border border-zinc-700 rounded-xl px-4 text-center uppercase text-white outline-none focus:border-blue-500" maxLength="6" />
                             <button onClick={handleJoinGame} className="px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold text-white transition">Dołącz</button>
                         </div>
                     </div>
@@ -521,9 +442,9 @@
                     </div>
                     <div className="w-full max-w-md bg-zinc-900 p-6 rounded-2xl mb-8">
                         <h3 className="mb-4 text-zinc-400">Gracze ({gameData.players.length}/4)</h3>
-                        {gameData.players.map(p => <div key={p.uid} className="bg-zinc-950 p-3 mb-2 rounded-xl text-white">{p.name} {p.uid === user.id ? '(Ty)' : ''}</div>)}
+                        {gameData.players.map(p => <div key={p.uid} className="bg-zinc-950 p-3 mb-2 rounded-xl text-white">{p.name} {p.uid === MY_UID ? '(Ty)' : ''}</div>)}
                     </div>
-                    {gameData.hostUid === user.id && <button onClick={handleStartGame} disabled={gameData.players.length < 2} className="bg-green-600 disabled:opacity-50 px-8 py-4 rounded-full font-bold flex gap-2 text-white"><Icon name="play"/> Rozpocznij</button>}
+                    {gameData.hostUid === MY_UID && <button onClick={handleStartGame} disabled={gameData.players.length < 2} className="bg-green-600 disabled:opacity-50 px-8 py-4 rounded-full font-bold flex gap-2 text-white"><Icon name="play"/> Rozpocznij</button>}
                     <button onClick={handleLeaveGame} className="mt-8 text-zinc-500 hover:text-white transition">Wyjdź z pokoju</button>
                     {errorMsg && <div className="absolute top-10 bg-blue-500 px-6 py-3 rounded-full text-white">{errorMsg}</div>}
                 </div>
@@ -543,9 +464,9 @@
                             <h3 className="text-2xl font-bold text-yellow-400 mb-6">Zwycięzca: {winner.name}</h3>
                             <div className="flex flex-col gap-4">
                                 {sortedPlayers.map((p, idx) => (
-                                <div key={p.uid} className={`flex justify-between items-center text-lg bg-zinc-950 p-4 rounded-xl border ${p.uid === user.id ? 'border-yellow-500/50' : 'border-transparent'}`}>
+                                <div key={p.uid} className={`flex justify-between items-center text-lg bg-zinc-950 p-4 rounded-xl border ${p.uid === MY_UID ? 'border-yellow-500/50' : 'border-transparent'}`}>
                                     <span className="font-medium text-zinc-300">
-                                    {idx + 1}. {p.name} {p.uid === user.id && '(Ty)'}
+                                    {idx + 1}. {p.name} {p.uid === MY_UID && '(Ty)'}
                                     </span>
                                     <span className="font-bold">{p.score} pkt</span>
                                 </div>
