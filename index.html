@@ -16,9 +16,8 @@
 
     <script>
         // TUTAJ WKLEJ SWOJE KLUCZE Z SUPABASE:
-                const SUPABASE_URL = 'https://ocjrmtnutfcayfzabbvn.supabase.co';
+        const SUPABASE_URL = 'https://ocjrmtnutfcayfzabbvn.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9janJtdG51dGZjYXlmemFiYnZuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0NjYzMjYsImV4cCI6MjA5MzA0MjMyNn0.xuO2g4tUDoQrZ2BrKpBVGr3pte6zVhpBpgB3ZQ1Z9TA';
-
 
         // Inicjalizacja Supabase
         if (SUPABASE_URL && SUPABASE_ANON_KEY) {
@@ -33,13 +32,19 @@
         const { useState, useEffect, useRef, useMemo, useCallback } = React;
         const supabase = window.supabaseClient;
 
+        // BŁĄD NAPRAWIONY TUTAJ: Używamy wrappera, aby Lucide nie gryzło się z wirtualnym DOM Reacta
         const Icon = ({ name, size = 24, className = "" }) => {
-            return <i data-lucide={name} style={{ width: size, height: size }} className={className}></i>;
-        };
+            const wrapperRef = useRef(null);
+            
+            useEffect(() => {
+                if (wrapperRef.current && window.lucide) {
+                    wrapperRef.current.innerHTML = `<i data-lucide="${name}" class="${className}" style="width: ${size}px; height: ${size}px;"></i>`;
+                    window.lucide.createIcons({ root: wrapperRef.current });
+                }
+            }, [name, size, className]);
 
-        function useLucide() {
-            useEffect(() => { if (window.lucide) window.lucide.createIcons(); });
-        }
+            return <span ref={wrapperRef} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}></span>;
+        };
 
         const SHAPES = ['circle', 'square', 'diamond', 'star', 'plus', 'clover'];
         const COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#a855f7'];
@@ -91,7 +96,6 @@
         ));
 
         function App() {
-            useLucide();
             const [user, setUser] = useState(null);
             const [authLoading, setAuthLoading] = useState(true);
             const [email, setEmail] = useState("");
