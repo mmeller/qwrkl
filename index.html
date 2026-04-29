@@ -271,6 +271,137 @@
                 if (!Object.values(staged).includes(id)) setSelectedHandId(p => p === id ? null : id);
             };
 
+            // --- VALIDATION AND SCORING LOGIC ---
+            const getMergedBoard = () => {
+                const merged = { ...board };
+                Object.entries(staged).forEach(([key, id]) => {
+                    merged[key] = myHand.find(t => t.id === id);
+                });
+                return merged;
+            };
+
+            const getLine = (x, y, dx, dy, merged) => {
+                let line = [];
+                let cx = x + dx;
+                let cy = y + dy;
+                while (merged[`${cx},${cy}`]) {
+                    line.push({ x: cx, y: cy, tile: merged[`${cx},${cy}`] });
+                    cx += dx;
+                    cy += dy;
+                }
+                return line;
+            };
+
+            const getFullLine = (x, y, dx, dy, merged) => {
+                const tile = merged[`${x},${y}`];
+                if (!tile) return [];
+                const forward = getLine(x, y, dx, dy, merged);
+                const backward = getLine(x, y, -dx, -dy, merged);
+                return [...backward.reverse(), { x, y, tile }, ...forward];
+            };
+
+            const isValidSequence = (tiles) => {
+                const allSameColor = tiles.every(t => t.color === tiles[0].color);
+                const allSameShape = tiles.every(t => t.shape === tiles[0].shape);
+                if (!allSameColor && !allSameShape) return false;
+                
+                const uniqueSet = new Set(tiles.map(t => t.color + t.shape));
+                if (uniqueSet.size !== tiles.length) return false; // Duplicates are not allowed
+                
+                return true;
+            };
+
+            const validateTurn = () => {
+                const stagedKeys = Object.keys(staged);
+                if (stagedKeys.length === 0) return { valid: false, reason: "Brak płytek na planszy." };
+
+                const merged = getMergedBoard();
+                const stagedCoords = stagedKeys.map(k => {
+                    const [x, y] = k.split(',').map(Number);
+                    return { x, y, tile: myHand.find(t => t.id === staged[k]) };
+                });
+
+                const isSameX = stagedCoords.every(c => c.x === stagedCoords[0].x);
+                const isSameY = stagedCoords.every(c => c.y === stagedCoords[0].y);
+                if (!isSameX && !isSameY) return { valid: false, reason: "Płytki muszą być w jednej linii (pion lub poziom)." };
+
+                if (isSameX) {
+                    const x = stagedCoords[0].x;
+                    const minY = Math.min(...stagedCoords.map(c => c.y));
+                    const maxY = Math.max(...stagedCoords.map(c => c.y));
+                    for (let y = minY; y <= maxY; y++) {
+                        if (!merged[`${x},${y}`]) return { valid: false, reason: "Ułożona linia ma przerwy." };
+                    }
+                } else {
+                    const y = stagedCoords[0].y;
+                    const minX = Math.min(...stagedCoords.map(c => c.x));
+                    const maxX = Math.max(...stagedCoords.map(c => c.x));
+                    for (let x = minX; x <= maxX; x++) {
+                        if (!merged[`${x},${y}`]) return { valid: false, reason: "Ułożona linia ma przerwy." };
+                    }
+                }
+
+                const boardKeys = Object.keys(board);
+                if (boardKeys.length > 0) {
+                    const hasConnection = stagedCoords.some(c => {
+                        return board[`${c.x + 1},${c.y}`] || board[`${c.x - 1},${c.y}`] ||
+                               board[`${c.x},${c.y + 1}`] || board[`${c.x},${c.y - 1}`];
+                    });
+                    if (!hasConnection) return { valid: false, reason: "Brak połączenia z planszą." };
+                }
+
+                for (let { x, y } of stagedCoords) {
+                    const hLine = getFullLine(x, y, 1, 0, merged);
+                    const vLine = getFullLine(x, y, 0, 1, merged);
+
+                    if (hLine.length > 1 && !isValidSequence(hLine.map(i => i.tile)))
+                        return { valid: false, reason: "Błąd w linii poziomej: niedozwolona kombinacja lub duplikat." };
+                    if (vLine.length > 1 && !isValidSequence(vLine.map(i => i.tile)))
+                        return { valid: false, reason: "Błąd w linii pionowej: niedozwolona kombinacja lub duplikat." };
+                }
+
+                return { valid: true };
+            };
+
+            const calculateScore = () => {
+                const merged = getMergedBoard();
+                const stagedKeys = Object.keys(staged);
+                const scoredHLines = new Set();
+                const scoredVLines = new Set();
+                let turnScore = 0;
+
+                stagedKeys.forEach(k => {
+                    const [x, y] = k.split(',').map(Number);
+                    const hLine = getFullLine(x, y, 1, 0, merged);
+                    const vLine = getFullLine(x, y, 0, 1, merged);
+
+                    if (hLine.length > 1) {
+                        const minX = Math.min(...hLine.map(i => i.x));
+                        const maxX = Math.max(...hLine.map(i => i.x));
+                        const lineId = `H,${y},${minX},${maxX}`;
+                        if (!scoredHLines.has(lineId)) {
+                            scoredHLines.add(lineId);
+                            turnScore += hLine.length;
+                            if (hLine.length === 6) turnScore += 6; // QWIRKLE BONUS
+                        }
+                    }
+
+                    if (vLine.length > 1) {
+                        const minY = Math.min(...vLine.map(i => i.y));
+                        const maxY = Math.max(...vLine.map(i => i.y));
+                        const lineId = `V,${x},${minY},${maxY}`;
+                        if (!scoredVLines.has(lineId)) {
+                            scoredVLines.add(lineId);
+                            turnScore += vLine.length;
+                            if (vLine.length === 6) turnScore += 6; // QWIRKLE BONUS
+                        }
+                    }
+                });
+
+                if (turnScore === 0 && stagedKeys.length > 0) turnScore = stagedKeys.length; 
+                return turnScore;
+            };
+
             const submitTurn = async (pts, hand, bag, newBoard) => {
                 const p = gameData.players.map(pl => pl.uid === user.id ? { ...pl, hand, score: pl.score + pts } : pl);
                 const isOver = bag.length === 0 && hand.length === 0;
@@ -288,12 +419,22 @@
 
             const handleConfirmTurn = () => {
                 if (!isMyTurn || Object.keys(staged).length === 0) return;
+                
+                const validation = validateTurn();
+                if (!validation.valid) {
+                    showError(validation.reason);
+                    return;
+                }
+
+                const pts = calculateScore();
+
                 const nb = { ...board };
                 Object.entries(staged).forEach(([k, id]) => nb[k] = myHand.find(t => t.id === id));
                 let nh = myHand.filter(t => !Object.values(staged).includes(t.id));
                 let nb_bag = [...gameData.bag];
                 if (6 - nh.length > 0 && nb_bag.length > 0) { nh = [...nh, ...nb_bag.slice(0, 6 - nh.length)]; nb_bag = nb_bag.slice(6 - nh.length); }
-                submitTurn(Object.keys(staged).length, nh, nb_bag, nb);
+                
+                submitTurn(pts, nh, nb_bag, nb);
             };
 
             const handleSwapConfirm = () => {
@@ -388,6 +529,40 @@
                 </div>
             );
 
+            // --- GAMEOVER ---
+            if (gameData.gameState === 'gameover') {
+                const sortedPlayers = [...gameData.players].sort((a, b) => b.score - a.score);
+                const winner = sortedPlayers[0];
+
+                return (
+                    <div className="flex flex-col items-center justify-center h-screen bg-zinc-950 text-white p-6 text-center">
+                        <Icon name="trophy" size={80} className="text-yellow-500 mb-6" />
+                        <h2 className="text-5xl font-bold mb-8">Koniec Gry!</h2>
+                        
+                        <div className="bg-zinc-900 p-8 rounded-3xl border border-zinc-800 w-full max-w-md mb-8">
+                            <h3 className="text-2xl font-bold text-yellow-400 mb-6">Zwycięzca: {winner.name}</h3>
+                            <div className="flex flex-col gap-4">
+                                {sortedPlayers.map((p, idx) => (
+                                <div key={p.uid} className={`flex justify-between items-center text-lg bg-zinc-950 p-4 rounded-xl border ${p.uid === user.id ? 'border-yellow-500/50' : 'border-transparent'}`}>
+                                    <span className="font-medium text-zinc-300">
+                                    {idx + 1}. {p.name} {p.uid === user.id && '(Ty)'}
+                                    </span>
+                                    <span className="font-bold">{p.score} pkt</span>
+                                </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <button 
+                            onClick={handleLeaveGame}
+                            className="px-8 py-4 bg-zinc-800 hover:bg-zinc-700 text-white font-bold rounded-full text-xl transition-colors flex items-center gap-2"
+                        >
+                            <Icon name="log-out" size={20}/> Wróć do menu
+                        </button>
+                    </div>
+                );
+            }
+
             const activePlayer = gameData.players[gameData.currentPlayerIdx];
             return (
                 <div className="flex flex-col h-screen">
@@ -399,6 +574,13 @@
                     </header>
                     <div className={`text-center py-1 text-xs font-bold uppercase text-white ${isMyTurn ? 'bg-green-600' : 'bg-zinc-800'}`}>{isMyTurn ? 'Twój ruch!' : `Czekaj, ruch wykonuje: ${activePlayer.name}`}</div>
                     
+                    {errorMsg && (
+                        <div className="absolute top-24 left-1/2 -translate-x-1/2 z-50 bg-red-500/90 text-white px-6 py-3 rounded-full shadow-lg flex items-center gap-2">
+                            <Icon name="alert-circle" size={20} />
+                            <span className="font-medium">{errorMsg}</span>
+                        </div>
+                    )}
+
                     <main ref={scrollRef} className="flex-1 overflow-auto bg-[#1a1a1c] relative cursor-grab">
                         <div style={{ width: GRID_SIZE*CELL_SIZE, height: GRID_SIZE*CELL_SIZE, display: 'grid', gridTemplateColumns: `repeat(${GRID_SIZE}, ${CELL_SIZE}px)`}}>
                             {Array.from({length: GRID_SIZE*GRID_SIZE}).map((_, i) => {
